@@ -5,7 +5,7 @@ It also contains two forks from Andrej Karpathy, minGPT and minBERT (previously 
 
 
 
-You will need a copy of the LCD2020T02 dataset, and Blodgett et al.’s leamr alignments, available at https://github.com/ablodge/leamr
+You will need a copy of the LCD2020T02 dataset, and Blodgett et al.’s leamr alignments, available at https://github.com/ablodge/leamr, as well as their tools suite : https://github.com/ablodge/amr-utils
 
 ## Building the dataset
 
