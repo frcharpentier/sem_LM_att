@@ -1,0 +1,816 @@
+diff --git a/amr_utils/alignments.py b/amr_utils/alignments.py
+index 8d65407..9794fda 100644
+--- a/amr_utils/alignments.py
++++ b/amr_utils/alignments.py
+@@ -69,7 +69,7 @@ def load_from_json(json_file, amrs=None, unanonymize=False):
+                         else:
+                             new_e = new_e[0]
+                             a['edges'][i] = [s, new_e[1], t]
+-        alignments[k] = [AMR_Alignment(a['type'], a['tokens'], a['nodes'], [tuple(e) for e in a['edges']]) for a in alignments[k]]
++        alignments[k] = [AMR_Alignment(a['type'], a['tokens'], a['nodes'], [tuple(e) for e in a['edges']] if "edges" in a else None) for a in alignments[k]]
+     if amrs:
+         for k in alignments:
+             for align in alignments[k]:
+diff --git a/amr_utils/amr.py b/amr_utils/amr.py
+index 83d5646..0401932 100644
+--- a/amr_utils/amr.py
++++ b/amr_utils/amr.py
+@@ -5,7 +5,15 @@ from amr_utils.alignments import AMR_Alignment
+ 
+ class AMR:
+ 
+-    def __init__(self, tokens:list=None, id=None, root=None, nodes:dict=None, edges:list=None, metadata:dict=None):
++    def __init__(self, tokens:list=None,
++                 id=None,
++                 root=None,
++                 nodes:dict=None,
++                 edges:list=None,
++                 metadata:dict=None,
++                 variables:list=None):
++                 #relations:dict=None,
++                 #attributes:dict=None):
+ 
+         if edges is None: edges = []
+         if nodes is None: nodes = {}
+@@ -16,9 +24,54 @@ class AMR:
+         self.root = root
+         self.nodes = nodes
+         self.edges = edges
++        if variables is None:
++            self.variables = [ X for X in self.nodes]
++        else:
++            self.variables = variables
++        #if relations is None:
++        #    self.relations = self.edges
++        #if attributes is None:
++        #    self.attributes = []
+         self.id = 'None' if id is None else id
+         self.metadata = metadata
+ 
++    def __getattr__(self, item):
++        if item == "instances":
++            return [(":instance", s ,self.nodes[s]) for s in self.variables]
++        elif item == "attributes":
++            attrib = [("TOP", self.root, self.nodes[self.root])]
++            attrib.extend((r, s, self.nodes[t]) for s,r,t in self.edges if not t in self.variables)
++            return attrib
++        #elif item == "attributes_redir":
++        #    attrib = [("TOP", self.root, self.nodes[self.root])]
++        #    for s,r,t in self.edges:
++        #        if not t in self.variables:
++        #            if r.endswith('-of') and r not in [':consist-of', ':prep-out-of', ':prep-on-behalf-of']:
++        #                attrib.append((r[:-len("-of")], self.nodes[t], s))
++        #            else:
++        #                attrib.append((r, s, self.nodes[t]))
++        #    return attrib
++        elif item == "relations":
++            return [(r, s, t) for s,r,t in self.edges if t in self.variables]
++        elif item == "relations_redir":
++            relat = []
++            for s,r,t in self.edges:
++                if t in self.variables:
++                    if r.endswith('-of') and r not in [':consist-of', ':prep-out-of', ':prep-on-behalf-of']:
++                        relat.append((r[:-len("-of")], t, s))
++                    else:
++                        relat.append((r, s, t))
++            return relat
++        else:
++            raise AttributeError
++        
++    def edges_redir(self):
++        for s, r, t in self.edges:
++            if r.endswith('-of') and r not in [':consist-of', ':prep-out-of', ':prep-on-behalf-of']:
++                s,r,t = t, r[:-len("-of")], s
++            yield (s,r,t)
++
++
+     def copy(self):
+         return AMR(self.tokens.copy(), self.id, self.root, self.nodes.copy(), self.edges.copy(), self.metadata.copy())
+ 
+@@ -46,19 +99,37 @@ class AMR:
+         return AMR_Alignment()
+ 
+     def triples(self, normalize_inverse_edges=False):
+-        taken_nodes = {self.root}
+-        yield self.root, ':instance', self.nodes[self.root]
++        #taken_nodes = {self.root}
++        #yield self.root, ':instance', self.nodes[self.root]
++        #for s,r,t in self.edges:
++        #    #if not self.nodes[t][0].isalpha() or self.nodes[t] in ['imperative', 'expressive', 'interrogative']:
++        #    if not t in self.variables:
++        #        yield s, r, self.nodes[t]
++        #        continue
++        #    if normalize_inverse_edges and r.endswith('-of') and r not in [':consist-of', ':prep-out-of', ':prep-on-behalf-of']:
++        #        yield t, r[:-len('-of')], s
++        #    else:
++        #        yield s, r, t
++        #    if t not in taken_nodes:
++        #        yield t, ':instance', self.nodes[t]
++        #        taken_nodes.add(t)
++                
++        for v in self.variables:
++            yield v, ":instance", self.nodes[v]
+         for s,r,t in self.edges:
+-            if not self.nodes[t][0].isalpha() or self.nodes[t] in ['imperative', 'expressive', 'interrogative']:
+-                yield s, r, self.nodes[t]
+-                continue
++            if not t in self.variables:
++                t = self.nodes[t]
+             if normalize_inverse_edges and r.endswith('-of') and r not in [':consist-of', ':prep-out-of', ':prep-on-behalf-of']:
+-                yield t, r[:-len('-of')], s
+-            else:
+-                yield s, r, t
+-            if t not in taken_nodes:
+-                yield t, ':instance', self.nodes[t]
+-                taken_nodes.add(t)
++                s,r,t = t, r[:-len("-of")], s
++            yield s,r,t
++
++    #def get_triples(self, normalize_inverse_edges=False):
++    #    for iden in self.variables:
++    #        yield iden, ":instance", self.nodes[iden]
++    #    for id1, rel, id2 in self.relations:
++    #        yield id1, rel, id2
++    #    for id1, rel, attr in self.attributes:
++    #        yield id1, rel, self.nodes[attr]
+ 
+     def _rename_node(self, a, b):
+         if b in self.nodes:
+diff --git a/amr_utils/amr_readers.py b/amr_utils/amr_readers.py
+index 38ae6c7..000e304 100644
+--- a/amr_utils/amr_readers.py
++++ b/amr_utils/amr_readers.py
+@@ -11,13 +11,15 @@ from amr_utils.amr import AMR
+ 
+ class Matedata_Parser:
+ 
+-    token_range_re = re.compile('^(\d-\d|\d(,\d)+)$')
+-    metadata_re = re.compile('(?<=[^#]) ::')
++    token_range_re = re.compile(r'^(\d-\d|\d(,\d)+)$')
++    metadata_re = re.compile(r'(?<=[^#]) ::')
+ 
+     def __init__(self):
+         pass
+ 
+-    def get_token_range(self, string):
++    #def get_token_range(self, string):
++    @staticmethod
++    def get_token_range(string):
+         if '-' in string:
+             start = int(string.split('-')[0])
+             end = int(string.split('-')[-1])
+@@ -25,11 +27,15 @@ class Matedata_Parser:
+         else:
+             return [int(i) for i in string.split(',')]
+ 
+-    def readlines(self, lines):
+-        lines = self.metadata_re.sub('\n# ::', lines)
++    #def readlines(self, lines):
++    @staticmethod
++    def readlines(lines):
++        #lines = self.metadata_re.sub('\n# ::', lines)
++        lines = Matedata_Parser.metadata_re.sub('\n# ::', lines)
+         metadata = {}
+         graph_metadata = {}
+-        rows = [self.readline_(line) for line in lines.split('\n')]
++        #rows = [self.readline_(line) for line in lines.split('\n')]
++        rows = [Matedata_Parser.readline_(line) for line in lines.split('\n')]
+         labels = {label for label,_ in rows}
+         for label in labels:
+             if label in ['root','node','edge']:
+@@ -40,7 +46,9 @@ class Matedata_Parser:
+             metadata['snt'] = ['']
+         return metadata, graph_metadata
+ 
+-    def readline_(self, line):
++    #def readline_(self, line):
++    @staticmethod
++    def readline_(line):
+         if not line.startswith('#'):
+             label = 'snt'
+             metadata = line.strip()
+@@ -62,8 +70,10 @@ class Matedata_Parser:
+             rows = [row for row in csv.reader([line], delimiter='\t', quotechar='|')]
+             metadata = rows[0]
+             for i, s in enumerate(metadata):
+-                if self.token_range_re.match(s):
+-                    metadata[i] = self.get_token_range(s)
++                #if self.token_range_re.match(s):
++                #    metadata[i] = self.get_token_range(s)
++                if Matedata_Parser.token_range_re.match(s):
++                    metadata[i] = Matedata_Parser.get_token_range(s)
+         elif line.startswith('# ::'):
+             label = line[len('# ::'):].split()[0]
+             line = line[len(f'# ::{label} '):]
+@@ -90,7 +100,250 @@ class PENMAN_Wrapper:
+     def __init__(self, style='isi'):
+         self.style = style
+ 
+-    def parse_amr(self, tokens, amr_string):
++    @staticmethod
++    def parse_amr_s(tokens, amr_string, arg_style = "isi"):
++        graphe = penman.decode(amr_string, model=TreePenmanModel())
++        triples = graphe.triples() if callable(graphe.triples) else graphe.triples
++
++        # Les triplets (source, relation, cible) sont de trois types
++        # La source est toujours le nom d’une variable.
++        # * Si la relation est
++        #   ":instance", la cible est un nom de concept, et on est en présence
++        #   d’un triplet d’INSTANCE
++        # * Si la relation n’est pas ":instance", et que la cible est le nom
++        #   d’une autre variable, on est en présence d’un triplet de RELATION
++        # * Si la relation n’est pas ":instance", et que la cible est le nom
++        #   d’une constante, on est en présence d’un triplet d’ATTRIBUT.
++
++        classif = [("I", s,r,t) if (r==":instance") else("?", s,r,t) for (s,r,t) in triples]
++        # I comme Instance
++
++        noms_variables = {s: (s,r,t) for c,s,r,t in classif if c == "I"}
++        
++        for i, (c,s,r,t) in enumerate(classif):
++            if c != "I":
++                if t in noms_variables:
++                    classif[i] = ("R", s,r,t)
++                    # R comme relation
++                else:
++                    classif[i] = ("A", s,r,t)
++                    # A comme attribut
++
++        sommets = dict()
++        # Les sommets de l’AMR seront soit des variables, soit des étiquettes constantes.
++        # (On exclut les noms de concept, qu’on identifie aux variables)
++        # Les clés de ce dictionnaire seront des noms de variable (en lettres dans la
++        # description de l’AMR), ou les triplets entiers pour les noms d’attribut
++        # Les valeurs seront les adresses GORN au format ISI et JAMR dans un n-uplet.
++
++        aretes = dict()
++        # Les clés de ce dictionnaire seront les triplets de relation ou d’attribut.
++        # Les valeurs seront les triplets où les sommets auront été remplacés par les
++        # adresses GORN, ainsi que les adresses ISI d’arête.
++        
++        nroot_isi = 1 #numéro de la racine
++        nroot_jmr = 0 #numéro de la racine
++        # reentrances_isi = dict()
++        # aretes_isi = dict()
++        #aretes_jmr = []
++        
++        var_index = { x:(1,0) for x in noms_variables }
++        # l’index de départ pour numéroter les sommets descendants de chaque variable,
++        # au format ISI, suivi de l’index au format JAMR.
++        
++        for categ,s,r,t in classif:
++            if categ == "I":
++                continue
++
++            if not s in sommets:
++                sommets[s] = ((str(nroot_isi),), str(nroot_jmr))
++                nroot_isi += 1
++                nroot_jmr += 1
++
++            source_isi, source_jmr = sommets[s][0][0], sommets[s][1]
++            cibles_isi = tuple(x + "." + str(var_index[s][0]) for x in sommets[s][0])
++            #cibles_isi = sommets[s][0][0] + "." + str(var_index[s][0])
++            cible_jmr = sommets[s][1] + "." + str(var_index[s][1])
++            
++            if categ == "R":
++                # Triplet de relation : La cible est une variable
++                if t in sommets:
++                    # Réentrance. On ajoute l’adresse ISI redondante du sommet.
++                    liste_isi, cible_jmr = sommets[t]
++                    liste_isi = liste_isi + cibles_isi
++                    #liste_isi = liste_isi + (cible_isi,)
++                    sommets[t] = (liste_isi, cible_jmr)
++                    # Création des ids de l’arête
++                    aretes[(s,r,t)] = (
++                                        "var",            # nature du sommet cible
++                                        tuple(x + ".r" for x in cibles_isi), # Adresse d’arête pour ISI
++                                        #cible_isi + ".r", # Adresse d’arête pour ISI
++                                        (source_isi, r, liste_isi[0]), #Triplet normalisé au format ISI
++                                        (source_jmr, r, cible_jmr)     #Triplet normalisé au format JAMR
++                                    )
++                    # On incrémente l’index ISI, mais pas l’index JAMR
++                    var_index[s] = (1 + var_index[s][0], var_index[s][1])
++                else:
++                    # On crée les adresses ISI et JAMR pour le sommet
++                    sommets[t] = (cibles_isi, cible_jmr)
++                    #sommets[t] = ((cible_isi,), cible_jmr)
++                    # Création des ids de l’arête
++                    aretes[(s,r,t)] = (
++                                        "var",            # nature du sommet cible
++                                        tuple(x + ".r" for x in cibles_isi), # Adresse d’arête pour ISI
++                                        #cible_isi + ".r", # Adresse d’arête pour ISI
++                                        (source_isi, r, cibles_isi[0]), # Triplet normalisé au format ISI
++                                        #(source_isi, r, cible_isi), # Triplet normalisé au format ISI
++                                        (source_jmr, r, cible_jmr)  # Triplet normalisé au format JAMR
++                                    )
++                    # On incrémente les index ISI et JAMR
++                    var_index[s] = (1 + var_index[s][0], 1 + var_index[s][1])
++                
++            elif categ == "A":
++                # Triplet de relation : La cible est une constante
++                # Pour les constantes, la clé dans le dico des sommets est le triplet entier.
++                sommets[(s,r,t)] = (cibles_isi, cible_jmr)
++                #sommets[(s,r,t)] = ((cible_isi,), cible_jmr)
++                # Création des ids de l’arête
++                aretes[(s,r,t)] = (
++                                    "const",          # nature du sommet cible
++                                    tuple(x + ".r" for x in cibles_isi), # Adresse d’arête pour ISI
++                                    #cible_isi + ".r", # Adresse d’arête pour ISI
++                                    (source_isi, r, cibles_isi[0]), # Triplet normalisé au format ISI
++                                    #(source_isi, r, cible_isi), # Triplet normalisé au format ISI
++                                    (source_jmr, r, cible_jmr)  # Triplet normalisé au format JAMR
++                                )
++                # On incrémente les index ISI et JAMR
++                var_index[s] = (1 + var_index[s][0], 1 + var_index[s][1])
++
++        for s in noms_variables:
++            if not s in sommets:
++                sommets[s] = ((str(nroot_isi),), str(nroot_jmr))
++                nroot_isi += 1
++                nroot_jmr += 1
++        
++        if arg_style == "isi":
++            racine = "1"
++            amr_nodes = dict()
++            amr_edges = []
++            amr_vars = dict()
++            isi_node_mapping = dict()
++            isi_edges_addr = dict()
++            jamr_node_mapping = dict()
++            letter_labels = dict()
++            idx_muet = 0
++            for k, (addresses_isi, addr_jmr) in sommets.items():
++                addr_isi_canon = addresses_isi[0]
++                for addr in addresses_isi:
++                    isi_node_mapping[addr] = addr_isi_canon
++                jamr_node_mapping[addr_jmr] = addr_isi_canon
++                if not type(k) is tuple:
++                    # k est un identifiant de variable
++                    amr_vars[addr_isi_canon] = k
++                    varb, rel, concept = noms_variables[k]
++                    assert varb == k and rel == ":instance"
++                    amr_nodes[addr_isi_canon] = concept
++                    letter_labels[k] = addr_isi_canon
++                else:
++                    _, _, constante = k[0], k[1], k[2]
++                    amr_nodes[addr_isi_canon] = constante
++                    while "x%d"%(idx_muet) in letter_labels:
++                        idx_muet += 1
++                    letter_labels["x%d"%(idx_muet)] = addr_isi_canon
++                    idx_muet += 1
++
++            #for k, (nat, addr_isi, trip_isi, trip_jmr) in aretes.items():
++            for k, (nat, addresses_isi, trip_isi, trip_jmr) in aretes.items():
++                amr_edges.append(trip_isi)
++                for addr_isi in addresses_isi:
++                    isi_edges_addr[addr_isi] = trip_isi
++
++        else: # if arg_style == "jamr":
++            racine = "0"
++            amr_nodes = dict()
++            amr_edges = []
++            amr_vars = dict()
++            isi_node_mapping = dict()
++            isi_edges_addr = dict()
++            jamr_node_mapping = dict()
++            letter_labels = dict()
++            idx_muet = 0
++            for k, (addresses_isi, addr_jmr) in sommets.items():
++                for addr in addresses_isi:
++                    isi_node_mapping[addr] = addr_jmr
++                jamr_node_mapping[addr_jmr] = addr_jmr
++                if not type(k) is tuple:
++                    # k est un identifiant de variable
++                    amr_vars[addr_jmr] = k
++                    varb, rel, concept = noms_variables[k]
++                    assert varb == k and rel == ":instance"
++                    amr_nodes[addr_jmr] = concept
++                    letter_labels[k] = addr_jmr
++                else:
++                    _, _, constante = k[0], k[1], k[2]
++                    amr_nodes[addr_jmr] = constante
++                    while "x%d"%(idx_muet) in letter_labels:
++                        idx_muet += 1
++                    letter_labels["x%d"%(idx_muet)] = addr_jmr
++                    idx_muet += 1
++
++            #for k, (nat, addr_isi, trip_isi, trip_jmr) in aretes.items():
++            for k, (nat, addresses_isi, trip_isi, trip_jmr) in aretes.items():
++                amr_edges.append(trip_jmr)
++                for addr_isi in addresses_isi:
++                    isi_edges_addr[addr_isi] = trip_jmr
++
++        amr = AMR(
++                    tokens = tokens,
++                    id = None,
++                    root = racine,
++                    nodes = amr_nodes,
++                    edges = amr_edges,
++                    metadata = None,
++                    variables = [x for x in amr_vars]
++                )
++                
++        aligns = []  
++    
++        for (s,r,t), epi in graphe.epidata.items():
++            for ali in epi:
++                if type(ali) is penman.surface.Alignment:
++                    if r == ":instance":
++                        somm = sommets[s][0][0] if arg_style == "isi" else sommets[s][1]
++                        aligns.append(AMR_Alignment(type = arg_style,
++                                                    tokens=list(ali.indices),
++                                                    nodes=[somm]))
++                    elif t in noms_variables:
++                        # si t est le nom d’une variable, c’est aussi une clé de sommets.
++                        somm = sommets[t][0][0] if arg_style == "isi" else sommets[t][1]
++                        aligns.append(AMR_Alignment(type = arg_style,
++                                                    tokens=list(ali.indices),
++                                                    nodes=[somm]))
++                    else:
++                        somm = sommets[(s, r, t)][0][0] if arg_style == "isi" else sommets[(s, r, t)][1]
++                        aligns.append(AMR_Alignment(type = arg_style,
++                                                    tokens=list(ali.indices),
++                                                    nodes=[somm]))
++                elif type(ali) is penman.surface.RoleAlignment:
++                    if r != ":instance":
++                        source = sommets[s][0][0] if arg_style == "isi" else sommets[s][1]
++                        if t in noms_variables:
++                            # si t est le nom d’une variable, c’est aussi une clé de sommets.
++                            cible  = sommets[t][0][0] if arg_style == "isi" else sommets[t][1]
++                        else:
++                            cible = sommets[(s,r,t)][0][0] if arg_style == "isi" else sommets[(s,r,t)][1]
++                        arete = (source, r, cible)
++                        aligns.append(AMR_Alignment(type = arg_style,
++                                                    tokens=list(ali.indices),
++                                                    edges=[arete]))
++                            
++        amr.isi_node_mapping = isi_node_mapping
++        return amr, (letter_labels, jamr_node_mapping, isi_node_mapping, isi_edges_addr, aligns)
++
++
++
++    @staticmethod
++    def parse_amr_s_0(tokens, amr_string, arg_style = 'isi'):
+         amr = AMR(tokens=tokens)
+         g = penman.decode(amr_string, model=TreePenmanModel())
+         triples = g.triples() if callable(g.triples) else g.triples
+@@ -110,6 +363,9 @@ class PENMAN_Wrapper:
+         edges = []
+         reentrancies = []
+ 
++        
++        instances = set(s for s,r,t in triples if r == ":instance")
++
+         for i,tr in enumerate(triples):
+             s, r, t = tr
+             # an amr node
+@@ -126,7 +382,8 @@ class PENMAN_Wrapper:
+                 nodes.append(tr)
+             # an amr edge
+             elif t not in letter_labels:
+-                if len(t) > 5 or not t[0].isalpha():
++                #if len(t) > 5 or not t[0].isalpha():
++                if not t in instances:
+                     if tr in letter_labels:
+                         isi_labels['ignore'] = isi_labels[s] + '.' + str(isi_edge_idx[s])
+                         isi_edge_labels['ignore'] = isi_labels[s] + '.' + str(isi_edge_idx[s])+'.r'
+@@ -152,6 +409,9 @@ class PENMAN_Wrapper:
+                     jamr_labels[t] = jamr_labels[s] + '.' + str(jamr_edge_idx[s])
+                     if i+1<len(triples) and triples[i+1][1]==':instance':
+                         jamr_edge_idx[s] += 1
++                    else:
++                        jamr_edge_idx[s] += 1
++                        jamr_edge_idx[s] -= 1
+                     isi_labels[t] = isi_labels[s] + '.' + str(isi_edge_idx[s])
+                     isi_edge_labels[tr] = isi_labels[s] + '.' + str(isi_edge_idx[s])+'.r'
+                     isi_edge_idx[s] += 1
+@@ -164,26 +424,33 @@ class PENMAN_Wrapper:
+                 reentrancies.append(tr)
+ 
+         default_labels = letter_labels
+-        if self.style=='isi':
++        if arg_style=='isi':
+             default_labels = isi_labels
+-        elif self.style=='jamr':
++        elif arg_style=='jamr':
+             default_labels = jamr_labels
+ 
+         amr.root = default_labels[g.top]
+         edge_map = {}
++        amr.variables = []
++        #amr.attributes = []
++        #amr.relations = []
+         for tr in nodes:
+             s,r,t = tr
+             amr.nodes[default_labels[s]] = t
++            amr.variables.append(default_labels[s])
++
+         for tr in attributes:
+             s,r,t = tr
+             if not r.startswith(':'): r = ':' + r
+             amr.nodes[default_labels[tr]] = t
+             amr.edges.append((default_labels[s], r, default_labels[tr]))
++            #amr.attributes.append((default_labels[s], r, default_labels[tr]))
+             edge_map[tr] = (default_labels[s], r, default_labels[tr])
+         for tr in edges:
+             s, r, t = tr
+             if not r.startswith(':'): r = ':' + r
+             amr.edges.append((default_labels[s], r, default_labels[t]))
++            #amr.relations.append((default_labels[s], r, default_labels[t]))
+             edge_map[tr] = (default_labels[s], r, default_labels[t])
+ 
+         aligns = []
+@@ -205,7 +472,11 @@ class PENMAN_Wrapper:
+         isi_labels = {v: default_labels[k] if k!='ignore' else k for k, v in isi_labels.items()}
+         isi_edge_labels = {v: edge_map[k] if k in edge_map else k for k, v in isi_edge_labels.items()}
+ 
+-        return amr, (letter_labels, jamr_labels, isi_labels, isi_edge_labels, aligns)
++        return amr, (letter_labels, jamr_labels, isi_labels, isi_edge_labels, aligns) 
++
++
++    def parse_amr(self, tokens, amr_string):
++        return PENMAN_Wrapper.parse_amr_s(tokens, amr_string, self.style)
+ 
+ 
+ class AMR_Reader:
+@@ -213,12 +484,68 @@ class AMR_Reader:
+     def __init__(self, style='isi'):
+         self.style=style
+ 
++    def loads(self, amr_string, remove_wiki=False, output_alignments=False, no_tokens=True):
++        aligns = None
++
++        lignes = amr_string.replace('\r', '').split('\n')
++        lignes = [l for l in lignes if len(l.strip()) > 0]
++        prefix_lines = [line for i,line in enumerate(lignes) if line.strip().startswith('#') or (i==0 and not no_tokens)]
++        prefix = '\n'.join(prefix_lines)
++        amr_string_lines = [line for i, line in enumerate(lignes)
++                            if not line.strip().startswith('#') and (i>0 or no_tokens)]
++        amr_string = ''.join(amr_string_lines).strip()
++        amr_string = re.sub(' +', ' ', amr_string)
++        if not amr_string:
++            return False
++        if not amr_string.startswith('(') or not amr_string.endswith(')'):
++            raise Exception('Could not parse AMR from: ', amr_string)
++        metadata, graph_metadata = Matedata_Parser.readlines(prefix)
++        tokens = metadata['tok'] if 'tok' in metadata else metadata['snt'].split()
++        tokens = self._clean_tokens(tokens)
++        if graph_metadata:
++            amr, aligns = self._parse_amr_from_metadata(tokens, graph_metadata)
++            amr.id = metadata['id']
++        else:
++            amr, (letter_labels, jamr_labels, isi_labels, isi_edge_labels, amraligns) = PENMAN_Wrapper.parse_amr_s(tokens, amr_string, self.style)
++            if 'id' in metadata:
++                amr.id = metadata['id']
++            else:
++                amr.id = ""
++            if output_alignments:
++                if 'alignments' in metadata:
++                    aligns = metadata['alignments'].split()
++                    if any('|' in a for a in aligns):
++                        aligns = self._parse_jamr_alignments(amr, "", aligns, jamr_labels)
++                    else:
++                        aligns = self._parse_isi_alignments(amr, "", aligns, isi_labels, isi_edge_labels)
++                else:
++                    aligns = amraligns
++        amr.metadata = {k:v for k,v in metadata.items() if k not in ['tok','id']}
++        if remove_wiki:
++            wiki_nodes = []
++            wiki_edges = []
++            for s, r, t in amr.edges.copy():
++                if r == ':wiki':
++                    amr.edges.remove((s, r, t))
++                    del amr.nodes[t]
++                    wiki_nodes.append(t)
++                    wiki_edges.append((s,r,t))
++            if aligns:
++                for align in aligns:
++                    for n in wiki_nodes:
++                        if n in align.nodes:
++                            align.nodes.remove(n)
++                    for e in wiki_edges:
++                        if e in align.edges:
++                            align.edges.remove(e)
++        if output_alignments:
++            return amr, aligns
++        return amr
++    
+     def load(self, amr_file_name, remove_wiki=False, output_alignments=False):
+         print('[amr]', 'Loading AMRs from file:', amr_file_name)
+         amrs = []
+         alignments = {}
+-        penman_wrapper = PENMAN_Wrapper(style=self.style)
+-        metadata_parser = Matedata_Parser()
+ 
+         with open(amr_file_name, 'r', encoding='utf8') as f:
+             sents = f.read().replace('\r', '').split('\n\n')
+@@ -228,67 +555,100 @@ class AMR_Reader:
+                 no_tokens = True
+ 
+             for sent in sents:
+-                prefix_lines = [line for i,line in enumerate(sent.split('\n')) if line.strip().startswith('#') or (i==0 and not no_tokens)]
+-                prefix = '\n'.join(prefix_lines)
+-                amr_string_lines = [line for i, line in enumerate(sent.split('\n'))
+-                                    if not line.strip().startswith('#') and (i>0 or no_tokens)]
+-                amr_string = ''.join(amr_string_lines).strip()
+-                amr_string = re.sub(' +', ' ', amr_string)
+-                if not amr_string: continue
+-                if not amr_string.startswith('(') or not amr_string.endswith(')'):
+-                    raise Exception('Could not parse AMR from: ', amr_string)
+-                metadata, graph_metadata = metadata_parser.readlines(prefix)
+-                tokens = metadata['tok'] if 'tok' in metadata else metadata['snt'].split()
+-                tokens = self._clean_tokens(tokens)
+-                if graph_metadata:
+-                    amr, aligns = self._parse_amr_from_metadata(tokens, graph_metadata)
+-                    amr.id = metadata['id']
+-                    if output_alignments:
+-                        alignments[amr.id] = aligns
++                resu = self.loads(sent, remove_wiki, output_alignments, no_tokens)
++                if not resu:
++                    continue
++                if output_alignments:
++                    amr, aligns = resu[0], resu[1]
+                 else:
+-                    amr, other_stuff = penman_wrapper.parse_amr(tokens, amr_string)
+-                    if 'id' in metadata:
+-                        amr.id = metadata['id']
+-                    else:
+-                        amr.id = str(amr_idx)
+-                    if output_alignments:
+-                        alignments[amr.id] = []
+-                        if 'alignments' in metadata:
+-                            aligns = metadata['alignments'].split()
+-                            if any('|' in a for a in aligns):
+-                                jamr_labels = other_stuff[1]
+-                                alignments[amr.id] = self._parse_jamr_alignments(amr, amr_file_name, aligns, jamr_labels, metadata_parser)
+-                            else:
+-                                isi_labels, isi_edge_labels = other_stuff[2:4]
+-                                alignments[amr.id] = self._parse_isi_alignments(amr, amr_file_name, aligns, isi_labels, isi_edge_labels)
+-                        else:
+-                            aligns = other_stuff[4]
+-                            alignments[amr.id] = aligns
+-                amr.metadata = {k:v for k,v in metadata.items() if k not in ['tok','id']}
++                    amr = resu
++                if amr.id == "":
++                    amr.id = str(amr_idx)
++
+                 amrs.append(amr)
++                if output_alignments:
++                    alignments[amr.id] = aligns
+                 amr_idx += 1
+-        if remove_wiki:
+-            for amr in amrs:
+-                wiki_nodes = []
+-                wiki_edges = []
+-                for s, r, t in amr.edges.copy():
+-                    if r == ':wiki':
+-                        amr.edges.remove((s, r, t))
+-                        del amr.nodes[t]
+-                        wiki_nodes.append(t)
+-                        wiki_edges.append((s,r,t))
+-                if alignments and amr.id in alignments:
+-                    for align in alignments[amr.id]:
+-                        for n in wiki_nodes:
+-                            if n in align.nodes:
+-                                align.nodes.remove(n)
+-                        for e in wiki_edges:
+-                            if e in align.edges:
+-                                align.edges.remove(e)
++
+         if output_alignments:
+             return amrs, alignments
+         return amrs
+ 
++    # def load_0(self, amr_file_name, remove_wiki=False, output_alignments=False):
++    #     print('[amr]', 'Loading AMRs from file:', amr_file_name)
++    #     amrs = []
++    #     alignments = {}
++
++    #     with open(amr_file_name, 'r', encoding='utf8') as f:
++    #         sents = f.read().replace('\r', '').split('\n\n')
++    #         amr_idx = 0
++    #         no_tokens = False
++    #         if all(sent.strip().startswith('(') for sent in sents):
++    #             no_tokens = True
++
++    #         for sent in sents:
++    #             prefix_lines = [line for i,line in enumerate(sent.split('\n')) if line.strip().startswith('#') or (i==0 and not no_tokens)]
++    #             prefix = '\n'.join(prefix_lines)
++    #             amr_string_lines = [line for i, line in enumerate(sent.split('\n'))
++    #                                 if not line.strip().startswith('#') and (i>0 or no_tokens)]
++    #             amr_string = ''.join(amr_string_lines).strip()
++    #             amr_string = re.sub(' +', ' ', amr_string)
++    #             if not amr_string: continue
++    #             if not amr_string.startswith('(') or not amr_string.endswith(')'):
++    #                 raise Exception('Could not parse AMR from: ', amr_string)
++    #             metadata, graph_metadata = Matedata_Parser.readlines(prefix)
++    #             tokens = metadata['tok'] if 'tok' in metadata else metadata['snt'].split()
++    #             tokens = self._clean_tokens(tokens)
++    #             if graph_metadata:
++    #                 amr, aligns = self._parse_amr_from_metadata(tokens, graph_metadata)
++    #                 amr.id = metadata['id']
++    #                 if output_alignments:
++    #                     alignments[amr.id] = aligns
++    #             else:
++    #                 amr, other_stuff = PENMAN_Wrapper.parse_amr_s(tokens, amr_string, self.style)
++    #                 if 'id' in metadata:
++    #                     amr.id = metadata['id']
++    #                 else:
++    #                     amr.id = str(amr_idx)
++    #                 if output_alignments:
++    #                     alignments[amr.id] = []
++    #                     if 'alignments' in metadata:
++    #                         aligns = metadata['alignments'].split()
++    #                         if any('|' in a for a in aligns):
++    #                             jamr_labels = other_stuff[1]
++    #                             alignments[amr.id] = self._parse_jamr_alignments(amr, amr_file_name, aligns, jamr_labels)#, metadata_parser)
++    #                         else:
++    #                             isi_labels, isi_edge_labels = other_stuff[2:4]
++    #                             alignments[amr.id] = self._parse_isi_alignments(amr, amr_file_name, aligns, isi_labels, isi_edge_labels)
++    #                     else:
++    #                         aligns = other_stuff[4]
++    #                         alignments[amr.id] = aligns
++    #             amr.metadata = {k:v for k,v in metadata.items() if k not in ['tok','id']}
++    #             amrs.append(amr)
++    #             amr_idx += 1
++    #     if remove_wiki:
++    #         for amr in amrs:
++    #             wiki_nodes = []
++    #             wiki_edges = []
++    #             for s, r, t in amr.edges.copy():
++    #                 if r == ':wiki':
++    #                     amr.edges.remove((s, r, t))
++    #                     del amr.nodes[t]
++    #                     wiki_nodes.append(t)
++    #                     wiki_edges.append((s,r,t))
++    #             if alignments and amr.id in alignments:
++    #                 for align in alignments[amr.id]:
++    #                     for n in wiki_nodes:
++    #                         if n in align.nodes:
++    #                             align.nodes.remove(n)
++    #                     for e in wiki_edges:
++    #                         if e in align.edges:
++    #                             align.edges.remove(e)
++    #     if output_alignments:
++    #         return amrs, alignments
++    #     return amrs
++    
++
+     def load_from_dir(self, dir, remove_wiki=False, output_alignments=False):
+         all_amrs = []
+         all_alignments = {}
+@@ -334,7 +694,7 @@ class AMR_Reader:
+         write_to_json(json_file, alignments)
+ 
+     @staticmethod
+-    def _parse_jamr_alignments(amr, amr_file, aligns, jamr_labels, metadata_parser):
++    def _parse_jamr_alignments(amr, amr_file, aligns, jamr_labels, metadata_parser=Matedata_Parser):
+         aligns = [(metadata_parser.get_token_range(a.split('|')[0]), a.split('|')[-1].split('+')) for a in aligns if '|' in a]
+ 
+         alignments = []
+@@ -454,6 +814,44 @@ def main():
+     reader.write_to_file(output_file, amrs)
+     reader.save_alignments_to_json(output_file.replace('.txt','.alignments.json'), alignments)
+ 
++def main2():
++    reader = AMR_Reader()
++    chaine = '(w / want-01:ARG0 (b / boy):ARG1 (g/ go-01:ARG0 b:polarity -:ARG1 (m / museum)))'
++    chaine2 = """
++    # ::id lpp_1943.2 ::date 2012-06-07T17:06:20 ::annotator ISI-AMR-05 ::preferred
++    # ::snt Once when I was six years old I saw a magnificent picture in a book , called True Stories from Nature , about the primeval forest .
++    # ::save-date Mon May 13, 2013 ::file lpp_1943_2.txt
++    (s / see-01
++        :ARG0 (i / i)
++        :ARG1 (p / picture
++                :mod (m / magnificent)
++                :location (b2 / book :wiki -
++                    :name (n / name :op1 "True" :op2 "Stories" :op3 "from" :op4 "Nature")
++                    :topic (f / forest
++                            :mod (p2 / primeval))))
++        :mod (o / once)
++        :time (a / age-01
++                :ARG1 i
++                :ARG2 (t / temporal-quantity :quant 6
++                    :unit (y / year))))
++                  """
++    amr = reader.loads(chaine2, remove_wiki=False)
++    tri1 = [tri for tri in amr.triples()]
++    tri2 = [tri for tri in amr.get_triples()]
++    assert all(t in tri1 for t in tri2)
++    assert all(t in tri2 for t in tri1)
++    petit_prince_data = r"C:/Users/fcharpentier/Documents/Boulot/visuAMR/Le_Petit_Prince_AMR/Le_petit_prince_GOLD.txt"
++    amrs = reader.load(petit_prince_data, remove_wiki=False, output_alignments=False)
++    for amr in amrs:
++        #print(amr.id)
++        #tri1 = [tri for tri in amr.triples()]
++        #tri2 = [tri for tri in amr.get_triples()]
++        #if (not all(t in tri1 for t in tri2)) or (not all(t in tri2 for t in tri1)):
++        #    print("ERREUR : ", amr.id)
++        if not all(t in amr.edges for t in amr.attributes + amr.relations):
++            print("ERREUR1 :", amr.id)
++        if not all(t in amr.attributes + amr.relations for t in amr.edges):
++            print("ERREUR1 :", amr.id)
+ 
+ if __name__ == '__main__':
+-    main()
++    main2()
